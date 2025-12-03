@@ -1,0 +1,9 @@
+flask
+flask-sqlalchemy
+Flask-WTF
+WTForms
+SQLAlchemy
+bleach
+email-validator
+python-dotenv
+Werkzeug
