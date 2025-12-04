@@ -7,10 +7,14 @@ import re
 
 # if username with the email exists already, raise error
 def username_not_taken(form, field):
-    if User.query.filter(User.username.ilike(field.data.strip())).first():
+    username = field.data.strip()
+    # protection against edge cases
+    sanitized = username.replace("%", r"\%").replace("_", r"\_")
+    user_exists = User.query.filter(User.username.ilike(sanitized)).first()
+    if user_exists:
         raise ValidationError("An account with this email already exists.")
 
-# given in spec
+# blacklist given in spec
 password_blacklist = {"Password123$", "Qwerty123!", "Adminadmin1@", "weLcome123!"}
 
 # validates password
@@ -37,7 +41,7 @@ def password_validation(form, field):
 # registration form
 class RegisterForm(FlaskForm):
     username = StringField("Email", validators=[DataRequired(), Email(message="Enter a valid email address."), Length(max=320), username_not_taken])
-    password = PasswordField("Password", validators=[DataRequired(), Length(min=8, max=128)])
+    password = PasswordField("Password", validators=[DataRequired(), Length(min=10, max=128), password_validation])
     confirm = PasswordField("Confirm Password", validators=[DataRequired(), EqualTo('password', message='Passwords must match.')])
     bio = TextAreaField("Bio", validators=[Optional(), Length(max=2000)])
     submit = SubmitField("Register")
@@ -45,12 +49,12 @@ class RegisterForm(FlaskForm):
 # login form
 class LoginForm(FlaskForm):
     username = StringField("Email", validators=[DataRequired(), Email(), Length(max=320)])
-    password = PasswordField("Password", validators=[DataRequired(), Length(min=8)])
+    password = PasswordField("Password", validators=[DataRequired(), Length(min=10, max=128)])
     submit = SubmitField("Login")
 
 # change password form
 class ChangePasswordForm(FlaskForm):
     current_password = PasswordField("Current password", validators=[DataRequired()])
-    new_password = PasswordField("New password", validators=[DataRequired(), Length(min=8)])
+    new_password = PasswordField("New password", validators=[DataRequired(), Length(min=10), password_validation])
     confirm = PasswordField("Confirm new password", validators=[DataRequired(), EqualTo('new_password', message='Passwords must match')])
     submit = SubmitField("Change password")

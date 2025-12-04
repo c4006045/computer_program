@@ -1,6 +1,7 @@
 import traceback
 from flask import request, render_template, redirect, url_for, session, Blueprint, flash, abort, current_app
 from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.sql.functions import user
 
 from app import db
@@ -10,6 +11,15 @@ from app.utils.sanitizer import sanitize_html
 from werkzeug.security import generate_password_hash, check_password_hash
 
 main = Blueprint('main', __name__)
+
+def escape_like(value: str) -> str:
+    # protects against characters that have meaning in SQL LIKE patterns
+    if not value:
+        return value
+    value = value.replace("\\", "\\\\")
+    value = value.replace("%", "\\%")
+    value = value.replace("_", "\\_")
+    return value
 
 @main.route('/')
 def home():
@@ -21,11 +31,11 @@ def login():
     form = LoginForm()
 
     if form.validate_on_submit():
-        username = form.username.data.strip().lower()
-        password = form.password.data
-        user = User.query.filter(User.username.ilike(username)).first()
+        username_raw = form.username.data.strip().lower()
+        username_safe = escape_like(username_raw)
+        user = (User.query.filter(User.username.ilike(f"{username_safe}", escape="\\")).first())
 
-        if user and user.check_password(password):
+        if user and user.check_password(form.password.data):
             session.clear()
             # new session
             session['user_id'] = user.id
@@ -37,6 +47,7 @@ def login():
             return redirect(url_for('main.dashboard'))
         else:
             flash('Login invalid, please try again', 'error')
+
     return render_template('login.html', form=form)
 
 # logout
@@ -49,9 +60,18 @@ def logout():
 # dashboard
 @main.route('/dashboard')
 def dashboard():
-    if 'user' not in session:
+    if 'user_id' not in session:
         return redirect(url_for('main.login'))
-    return render_template('dashboard.html', username=session['user'], bio=session['bio'])
+
+    user = User.query.get(session['user_id'])
+
+    if not user:
+        session.clear()
+        return redirect(url_for('main.login'))
+
+    # sanitise bio
+    safe_bio = sanitize_html(user.bio or '')
+    return render_template('dashboard.html', username=user.username, bio=safe_bio)
 
 # register
 @main.route('/register', methods=['GET', 'POST'])
@@ -59,14 +79,25 @@ def register():
     form = RegisterForm()
 
     if form.validate_on_submit():
-        username = form.username.data
-        password = generate_password_hash(form.password.data)
+        username = form.username.data.strip().lower()
+        password = form.password.data
 
-        user = User(username=username, password=password, role="user", bio="New user")
-        db.session.add(user)
-        db.session.commit()
+        # sanitized default bio content for new users
+        bio_clean = sanitize_html("Hello, I am a new user.")[:500]
 
-        flash("Registration successful.", "success")
+        # create user and hash password
+        new_user = User(username=username, password=password, role='user', bio=bio_clean)
+        db.session.add(new_user)
+        try:
+            db.session.commit()
+        except SQLAlchemyError:
+            db.session.rollback()
+            current_app.logger.exception("Error creating user")
+            flash("An error has occurred while creating your account.", "danger")
+            return render_template('register.html', form=form)
+
+        # successful registration
+        flash("Registration complete, please log into your account.", "success")
         return redirect(url_for('main.login'))
 
     return render_template('register.html', form=form)
@@ -88,12 +119,17 @@ def user_dashboard():
     if not user:
         session.clear()
         return redirect(url_for('main.login'))
+
     return render_template('user_dashboard.html', username=user.username)
 
 # change password
 @main.route('/change-password', methods=['GET', 'POST'])
 def change_password():
-    if 'user' not in session:
+    if 'user_id' not in session:
+        abort(403, description="Access denied.")
+    user = User.query.get(session['user_id'])
+    if not user:
+        session.clear()
         abort(403, description="Access denied.")
 
     form = ChangePasswordForm()
@@ -102,17 +138,18 @@ def change_password():
         new_password = form.new_password.data
 
         # check if password is correct
-        if not check_password_hash(user.password, current_password):
+        if not user.check_password(current_password):
             flash('Current password is incorrect', 'error')
             return render_template('change_password.html', form=form)
 
         # new password must be different from current
-        if check_password_hash(user.password, new_password):
+        if user.check_password(new_password):
             flash("New password must be different from old password.", "error")
             return render_template('change_password.html', form=form)
 
         # update password
-        user.password = generate_password_hash(new_password)
+        user.set_password(new_password)
+        db.session.add(user)
         db.session.commit()
 
         # renew session

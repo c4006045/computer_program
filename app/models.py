@@ -11,10 +11,10 @@ class User(db.Model):
     bio = db.Column(db.String(500), nullable=False)
 
     def __init__(self, username, password, role, bio):
-        self.username = username
+        self.username = (username or '').strip().lower()
         self.set_password(password)
-        self.role = role
-        self.bio = bio
+        self.role = role if role in ('user', 'moderator', 'admin') else 'user'
+        self.bio = (bio or '')[:500]
 
     def set_password(self, plaintext_password: str):
         self.password = generate_password_hash(plaintext_password)
