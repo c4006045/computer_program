@@ -1,6 +1,8 @@
 import traceback
 from flask import request, render_template, redirect, url_for, session, Blueprint, flash, abort, current_app
 from sqlalchemy import text
+from sqlalchemy.sql.functions import user
+
 from app import db
 from app.models import User
 from app.forms import RegisterForm, LoginForm, ChangePasswordForm
@@ -13,9 +15,11 @@ main = Blueprint('main', __name__)
 def home():
     return render_template('home.html')
 
+# login
 @main.route('/login', methods=['GET', 'POST'])
 def login():
     form = LoginForm()
+
     if form.validate_on_submit():
         username = form.username.data.strip().lower()
         password = form.password.data
@@ -23,83 +27,60 @@ def login():
 
         if user and user.check_password(password):
             session.clear()
+            # new session
             session['user_id'] = user.id
             session['user'] = user.username
             session['role'] = user.role
+            session['bio'] = user.bio
+            session.permanent = True
             flash('Login successful', 'success')
             return redirect(url_for('main.dashboard'))
         else:
-            flash('Login credentials are invalid, please try again', 'danger')
+            flash('Login invalid, please try again', 'error')
     return render_template('login.html', form=form)
 
+# logout
+@main.route('/logout')
+def logout():
+    session.clear()
+    flash("You have been logged out.", "info")
+    return redirect(url_for('main.home'))
 
+# dashboard
 @main.route('/dashboard')
 def dashboard():
-    if 'user_id' in session:
-        user = User.query.get(session['user_id'])
-        if not user:
-            session.clear()
-            return redirect(url_for('main.login'))
-        # sanitize at render-time as defence-in-depth
-        safe_bio = sanitize_html(user.bio or '')
-        return render_template('dashboard.html', username=user.username, bio=safe_bio)
-    return redirect(url_for('main.login'))
+    if 'user' not in session:
+        return redirect(url_for('main.login'))
+    return render_template('dashboard.html', username=session['user'], bio=session['bio'])
 
+# register
 @main.route('/register', methods=['GET', 'POST'])
 def register():
     form = RegisterForm()
+
     if form.validate_on_submit():
-        username = form.username.data.strip().lower()
-        password = form.password.data
-        bio = form.bio.data or ''
-        # Always set role server-side
-        role = 'user'
+        username = form.username.data
+        password = generate_password_hash(form.password.data)
 
-        # sanitize bio before storing
-        bio_clean = sanitize_html(bio)
-        # truncate to MAX_BIO_LENGTH to be safe
-        max_bio = current_app.config.get('MAX_BIO_LENGTH', 2000)
-        if len(bio_clean) > max_bio:
-            bio_clean = bio_clean[:max_bio]
+        user = User(username=username, password=password, role="user", bio="New user")
+        db.session.add(user)
+        db.session.commit()
 
-        new_user = User(username=username, password=password, role=role, bio=bio_clean)
-        db.session.add(new_user)
-        try:
-            db.session.commit()
-        except Exception:
-            db.session.rollback()
-            current_app.logger.exception("Error creating user")
-            flash('An error occurred while creating your account. Please try again.', 'danger')
-            return render_template('register.html', form=form)
-        flash('Registration complete. Please log in.', 'success')
+        flash("Registration successful.", "success")
         return redirect(url_for('main.login'))
+
     return render_template('register.html', form=form)
 
-
-def require_role(required_role):
-    def decorator(fn):
-        def wrapper(*args, **kwargs):
-            if session.get('role') != required_role:
-                abort(403, description="Access denied.")
-            return fn(*args, **kwargs)
-
-        wrapper.__name__ = fn.__name__
-        return wrapper
-
-    return decorator
-
+# roles
 @main.route('/admin-panel')
-@require_role('admin')
 def admin():
     return render_template('admin.html')
 
 @main.route('/moderator')
-@require_role('moderator')
 def moderator():
     return render_template('moderator.html')
 
 @main.route('/user-dashboard')
-@require_role('user')
 def user_dashboard():
     if 'user_id' not in session:
         return redirect(url_for('main.login'))
@@ -109,13 +90,10 @@ def user_dashboard():
         return redirect(url_for('main.login'))
     return render_template('user_dashboard.html', username=user.username)
 
+# change password
 @main.route('/change-password', methods=['GET', 'POST'])
 def change_password():
-    if 'user_id' not in session:
-        abort(403, description="Access denied.")
-    user = User.query.get(session['user_id'])
-    if not user:
-        session.clear()
+    if 'user' not in session:
         abort(403, description="Access denied.")
 
     form = ChangePasswordForm()
@@ -123,18 +101,23 @@ def change_password():
         current_password = form.current_password.data
         new_password = form.new_password.data
 
-        if not user.check_password(current_password):
+        # check if password is correct
+        if not check_password_hash(user.password, current_password):
             flash('Current password is incorrect', 'error')
             return render_template('change_password.html', form=form)
 
-        if current_password == new_password:
-            flash('New password must be different from the current password', 'error')
+        # new password must be different from current
+        if check_password_hash(user.password, new_password):
+            flash("New password must be different from old password.", "error")
             return render_template('change_password.html', form=form)
 
-        user.set_password(new_password)
-        db.session.add(user)
+        # update password
+        user.password = generate_password_hash(new_password)
         db.session.commit()
 
-        flash('Password changed successfully', 'success')
-        return redirect(url_for('main.dashboard'))
+        # renew session
+        session.clear()
+        flash("Password updated. Please log in again.", "success")
+        return redirect(url_for('main.login'))
+
     return render_template('change_password.html', form=form)

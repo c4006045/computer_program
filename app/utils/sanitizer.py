@@ -1,5 +1,6 @@
 import bleach
 
+# given in spec
 tags_allowed = ['b', 'i', 'u', 'em', 'strong', 'a', 'p', 'ul', 'ol', 'li', 'br']
 attributes_allowed = {'a': ['href', 'title']}
 protocols_allowed = ['http', 'https', 'mailto']
