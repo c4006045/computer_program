@@ -28,6 +28,14 @@ class User(db.Model):
     def __repr__(self):
         return f'<User {self.username}>'
 
+    # role checks
+    def is_admin(self) -> bool:
+        return self.role == 'admin'
+    def is_moderator(self) -> bool:
+        return self.role == 'moderator'
+    def is_user(self) -> bool:
+        return self.role == 'user'
+
 
 
 

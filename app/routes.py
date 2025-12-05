@@ -1,4 +1,6 @@
 import traceback
+from functools import wraps
+
 from flask import request, render_template, redirect, url_for, session, Blueprint, flash, abort, current_app
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
@@ -11,8 +13,33 @@ from werkzeug.security import generate_password_hash, check_password_hash
 
 main = Blueprint('main', __name__)
 
+# makes sure user is logged in to access the route
+def login_required(f):
+    @wraps(f)
+    def wrap(*args, **kwargs):
+        if "user_id" not in session:
+            flash("You need to login first", "error")
+            return redirect(url_for("main.login"))
+        return f(*args, **kwargs)
+    return wrap
+
+# makes sure user has a role, matches role to route
+def roles_required(role):
+    def decorator(f):
+        @wraps(f)
+        def wrap(*args, **kwargs):
+            if "user_id" not in session: # ensures user is logged in
+                flash("You need to login first", "error")
+                return redirect(url_for("main.login"))
+            user = User.query.get(session["user_id"])
+            if not user or user.role != role: # checks user exists and has correct role
+                abort(403, description=f"User {user.username} is not authorized to access this page")
+            return f(*args, **kwargs)
+        return wrap
+    return decorator
+
+# protects against characters that have meaning in SQL LIKE queries
 def escape_like(value: str) -> str:
-    # protects against characters that have meaning in SQL LIKE patterns
     if not value:
         return value
     value = value.replace("\\", "\\\\")
@@ -32,6 +59,7 @@ def login():
     if form.validate_on_submit():
         username_raw = form.username.data.strip().lower()
         username_safe = escape_like(username_raw)
+
         user = (User.query.filter(User.username.ilike(f"{username_safe}", escape="\\")).first())
 
         if user and user.check_password(form.password.data):
@@ -58,12 +86,9 @@ def logout():
 
 # dashboard
 @main.route('/dashboard')
+@login_required # must be logged in
 def dashboard():
-    if 'user_id' not in session:
-        return redirect(url_for('main.login'))
-
     user = User.query.get(session['user_id'])
-
     if not user:
         session.clear()
         return redirect(url_for('main.login'))
@@ -92,28 +117,29 @@ def register():
         except SQLAlchemyError:
             db.session.rollback()
             current_app.logger.exception("Error creating user")
-            flash("An error has occurred while creating your account.", "danger")
+            flash("An error has occurred while creating your account", "danger")
             return render_template('register.html', form=form)
 
         # successful registration
-        flash("Registration complete, please log into your account.", "success")
+        flash("Registration complete, please log into your account", "success")
         return redirect(url_for('main.login'))
 
     return render_template('register.html', form=form)
 
 # roles
 @main.route('/admin-panel')
+@roles_required('admin') # access for admins only
 def admin():
     return render_template('admin.html')
 
 @main.route('/moderator')
+@roles_required('moderator') # access for moderators only
 def moderator():
     return render_template('moderator.html')
 
 @main.route('/user-dashboard')
+@roles_required('admin') # access for admins only
 def user_dashboard():
-    if 'user_id' not in session:
-        return redirect(url_for('main.login'))
     user = User.query.get(session['user_id'])
     if not user:
         session.clear()
@@ -123,15 +149,15 @@ def user_dashboard():
 
 # change password
 @main.route('/change-password', methods=['GET', 'POST'])
+@login_required # must be logged in
 def change_password():
-    if 'user_id' not in session:
-        abort(403, description="Access denied.")
     user = User.query.get(session['user_id'])
     if not user:
         session.clear()
-        abort(403, description="Access denied.")
+        abort(403, description="Access denied")
 
     form = ChangePasswordForm()
+
     if form.validate_on_submit():
         current_password = form.current_password.data
         new_password = form.new_password.data
@@ -143,17 +169,16 @@ def change_password():
 
         # new password must be different from current
         if user.check_password(new_password):
-            flash("New password must be different from old password.", "error")
+            flash("New password must be different from old password", "error")
             return render_template('change_password.html', form=form)
 
         # update password
         user.set_password(new_password)
-        db.session.add(user)
         db.session.commit()
 
         # renew session
         session.clear()
-        flash("Password updated. Please log in again.", "success")
+        flash("Password updated, please log in again", "success")
         return redirect(url_for('main.login'))
 
     return render_template('change_password.html', form=form)
