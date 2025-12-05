@@ -3,10 +3,19 @@
 {% block content %}
 <h1>Register</h1>
 
+<!-- flash messages -->
+{% with messages = get_flashed_messages(with_categories=true) %}
+  {% if messages %}
+    {% for category, message in messages %}
+      <p class="text-success">{{ message }}</p>
+    {% endfor %}
+  {% endif %}
+{% endwith %}
+
 <form method="POST" novalidate>
   {{ form.csrf_token }}
 
-  <div>
+  <div class="mb-3">
       {{ form.username.label }}<br>
       {{ form.username(class="form-control") }}
       <!-- shows username errors -->
@@ -15,7 +24,7 @@
       {% endif %}
   </div>
 
-  <div>
+  <div class="mb-3">
       {{ form.password.label }}<br>
       {{ form.password(class="form-control") }}
       <!-- shows password errors -->
@@ -24,7 +33,7 @@
       {% endif %}
   </div>
 
-  <div>
+  <div class="mb-3">
       {{ form.bio.label }}<br>
       {{ form.bio(class="form-control") }}
       {% if form.bio.errors %}
