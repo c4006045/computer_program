@@ -88,13 +88,18 @@ def logout():
 @main.route('/dashboard')
 @login_required # must be logged in
 def dashboard():
+    if 'user_id' not in session:
+        return redirect(url_for('main.login'))
+
     user = User.query.get(session['user_id'])
     if not user:
         session.clear()
         return redirect(url_for('main.login'))
 
-    # sanitise bio
-    safe_bio = sanitize_html(user.bio or '')
+    # decrypt and sanitize bio
+    decrypted_bio = user.decrypt_bio()
+    safe_bio = sanitize_html(decrypted_bio)
+
     return render_template('dashboard.html', username=user.username, bio=safe_bio)
 
 # register
@@ -106,11 +111,11 @@ def register():
         username = form.username.data.strip().lower()
         password = form.password.data
 
-        # sanitized default bio content for new users
-        bio_clean = sanitize_html("I'm a new user.")[:500]
+        # default bio content for new users
+        default_bio = "I'm a new user."
 
         # create user and hash password
-        new_user = User(username=username, password=password, role='user', bio=bio_clean)
+        new_user = User(username=username, password=password, role='user', bio=default_bio)
         db.session.add(new_user)
         try:
             db.session.commit()

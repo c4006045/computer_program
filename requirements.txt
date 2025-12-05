@@ -1,9 +1,6 @@
-flask
-flask-sqlalchemy
+Flask
 Flask-WTF
-WTForms
-SQLAlchemy
-bleach
+Flask-SQLAlchemy
+cryptography
 email-validator
 python-dotenv
-Werkzeug
