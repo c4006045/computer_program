@@ -2,7 +2,6 @@ import traceback
 from flask import request, render_template, redirect, url_for, session, Blueprint, flash, abort, current_app
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.sql.functions import user
 
 from app import db
 from app.models import User
@@ -83,7 +82,7 @@ def register():
         password = form.password.data
 
         # sanitized default bio content for new users
-        bio_clean = sanitize_html("Hello, I am a new user.")[:500]
+        bio_clean = sanitize_html("I'm a new user.")[:500]
 
         # create user and hash password
         new_user = User(username=username, password=password, role='user', bio=bio_clean)
