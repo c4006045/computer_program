@@ -3,34 +3,17 @@
 {% block content %}
 <h1>Login</h1>
 
-<!-- flash messages -->
-{% with messages = get_flashed_messages(with_categories=true) %}
-{% if messages %}
-{% for category, message in messages %}
-<p class="text-danger">{{ message }}</p>
-{% endfor %}
-{% endif %}
-{% endwith %}
-
 <form method="POST" novalidate>
-  {{ form.csrf_token }}
+  {{ form.hidden_tag() }}
 
   <div>
       {{ form.username.label }}<br>
       {{ form.username(class="form-control") }}
-      <!-- shows username errors -->
-      {% if form.username.errors %}
-          <p class="text-danger">{{ form.username.errors[0] }}</p>
-      {% endif %}
   </div>
 
   <div>
       {{ form.password.label }}<br>
       {{ form.password(class="form-control") }}
-      <!-- shows password errors -->
-      {% if form.password.errors %}
-          <p class="text-danger">{{ form.password.errors[0] }}</p>
-      {% endif %}
   </div>
 
   <br>

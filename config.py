@@ -25,5 +25,5 @@ class ProductionConfig(Config):
     # require SECRET_KEY and DATABASE_URI be set
     if not SQLALCHEMY_DATABASE_URI:
         raise RuntimeError("DATABASE_URI must be set in production environment")
-    if SECRET_KEY == "dev-secret-please-change":
+    if Config.SECRET_KEY == "custom_key":
         raise RuntimeError("SECRET_KEY must be set to a secure value in production")

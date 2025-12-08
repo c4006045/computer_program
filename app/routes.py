@@ -142,13 +142,12 @@ def register():
         return redirect(url_for('main.login'))
 
     if request.method == "POST" and not form.validate_on_submit():
-        errors = {
-            field.name: field.errors
-            for field in form
-            if field.errors and field.name != "password"
-        }
+        current_app.logger_security = getattr(current_app, "logger_security", current_app.logger)
+        current_app.logger_security.warning("register_form_invalid", exc_info=False)
+        # log error details
+        errors = {f.name: f.errors for f in form if f.errors and f.name != "password"}
         if errors:
-            log_event("form_validation_failed", level="WARNING", details={"form": "login", "errors": errors})
+            log_event("form_validation_failed", level="WARNING", details={"form": "register", "errors": errors})
 
     return render_template('register.html', form=form)
 

@@ -5,6 +5,8 @@ from app.cryptography import hash_password, verify_password, encrypt_bio, decryp
 import os
 from app import db
 
+PEPPER = os.environ.get("APP_PASSWORD_PEPPER", "")
+
 def get_fernet():
     key = os.environ.get('bio_encryption_key')
     if not key:
@@ -25,13 +27,28 @@ class User(db.Model):
         self.bio = (bio or '')[:500]
 
     def set_password(self, plaintext_password: str): # secure password by hashing
-        pepper = os.environ.get('password_pepper', '')
-        self.password = generate_password_hash(plaintext_password + pepper)
+        if plaintext_password is None:
+            raise ValueError("Password cannot be None")
+            # store with pepper appended
+        self.password = generate_password_hash(plaintext_password + PEPPER)
 
     def check_password(self, plaintext_password: str) -> bool: # verifies password with pepper
         try:
-            pepper = os.environ.get("password_pepper", "")
-            return check_password_hash(self.password, plaintext_password + pepper)
+            # try with pepper
+            if check_password_hash(self.password, plaintext_password + PEPPER):
+                return True
+            # try without pepper
+            if check_password_hash(self.password, plaintext_password):
+                # upgrade stored hash to use pepper
+                try:
+                    self.set_password(plaintext_password)
+                    db.session.add(self)
+                    db.session.commit()
+                except Exception:
+                    db.session.rollback()
+                return True
+
+            return False
         except Exception:
             return False
 
@@ -41,10 +58,23 @@ class User(db.Model):
         return get_fernet().encrypt(bio_plaintext.encode())
 
     def decrypt_bio(self) -> str: # decrypts bio for user display
+        if not self.bio:
+            return ""
         try:
-            return get_fernet().decrypt(self.bio).decode()
-        except InvalidToken:
-            return "Error, bio cannot be decrypted"
+            # try decrypt
+            key = os.environ.get("BIO_ENC_KEY")
+            if not key:
+                # assume stored plaintext
+                return self.bio.decode() if isinstance(self.bio, (bytes, bytearray)) else self.bio
+            f = Fernet(key.encode() if isinstance(key, str) else key)
+            # if self.bio is bytes, pass directly, if not, encode
+            token = self.bio if isinstance(self.bio, (bytes, bytearray)) else self.bio.encode()
+            return f.decrypt(token).decode()
+        except (InvalidToken, ValueError):
+            # if decrypt fails, assume plaintext
+            return self.bio.decode() if isinstance(self.bio, (bytes, bytearray)) else self.bio
+        except Exception:
+            return ""
 
     def __repr__(self):
         return f'<User {self.username}>'
