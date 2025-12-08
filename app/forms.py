@@ -48,8 +48,8 @@ class RegisterForm(FlaskForm):
 
 # login form
 class LoginForm(FlaskForm):
-    username = StringField("Email", validators=[DataRequired(), Email(), Length(max=320)])
-    password = PasswordField("Password", validators=[DataRequired(), Length(min=10, max=128)])
+    username = StringField("Email", validators=[DataRequired()])
+    password = PasswordField("Password", validators=[DataRequired()])
     submit = SubmitField("Login")
 
 # change password form

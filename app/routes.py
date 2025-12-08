@@ -10,6 +10,8 @@ from app.models import User
 from app.forms import RegisterForm, LoginForm, ChangePasswordForm
 from app.utils.sanitizer import sanitize_html
 from werkzeug.security import generate_password_hash, check_password_hash
+from app.utils.audit import log_event
+
 
 main = Blueprint('main', __name__)
 
@@ -33,6 +35,8 @@ def roles_required(role):
                 return redirect(url_for("main.login"))
             user = User.query.get(session["user_id"])
             if not user or user.role != role: # checks user exists and has correct role
+                # log access violation
+                log_event("access_denied", level="WARNING", user_id=(user.id if user else None), username=(user.username if user else None), details={"required_role": role, "attempted_role": user.role if user else None})
                 abort(403, description=f"User {user.username} is not authorized to access this page")
             return f(*args, **kwargs)
         return wrap
@@ -70,10 +74,13 @@ def login():
             session['role'] = user.role
             session['bio'] = user.bio
             session.permanent = True
+            log_event("user_login_success", level="INFO", user_id=user.id, username=user.username)
             flash('Login successful', 'success')
             return redirect(url_for('main.dashboard'))
         else:
-            flash('Login invalid, please try again', 'error')
+            # log failed login attempt
+            log_event("user_login_failed", level="WARNING", user_id=(user.id if user else None), username=(user.username if user else form.username.data), details={"reason": "invalid_credentials"})
+            flash("One of either the username or password is incorrect, please log in again", "error")
 
     return render_template('login.html', form=form)
 
@@ -119,15 +126,29 @@ def register():
         db.session.add(new_user)
         try:
             db.session.commit()
+            # log successful registration
+            log_event("user_registration_success", level="INFO", username=username)
         except SQLAlchemyError:
             db.session.rollback()
             current_app.logger.exception("Error creating user")
+            # log failure
+            log_event("user_registration_failed", level="ERROR", username=username, details={"reason": "db_error"})
             flash("An error has occurred while creating your account", "danger")
             return render_template('register.html', form=form)
 
         # successful registration
+        log_event("user_registration_success", level="INFO", username=username)
         flash("Registration complete, please log into your account", "success")
         return redirect(url_for('main.login'))
+
+    if request.method == "POST" and not form.validate_on_submit():
+        errors = {
+            field.name: field.errors
+            for field in form
+            if field.errors and field.name != "password"
+        }
+        if errors:
+            log_event("form_validation_failed", level="WARNING", details={"form": "login", "errors": errors})
 
     return render_template('register.html', form=form)
 
@@ -169,6 +190,7 @@ def change_password():
 
         # check if password is correct
         if not user.check_password(current_password):
+            log_event("password_change_failed", level="WARNING", user_id=user.id, username=user.username, details={"reason": "incorrect_current_password"})
             flash('Current password is incorrect', 'error')
             return render_template('change_password.html', form=form)
 
@@ -180,10 +202,20 @@ def change_password():
         # update password
         user.set_password(new_password)
         db.session.commit()
+        log_event("password_changed", level="INFO", user_id=user.id, username=user.username)
 
         # renew session
         session.clear()
         flash("Password updated, please log in again", "success")
         return redirect(url_for('main.login'))
+
+    if request.method == "POST" and not form.validate_on_submit():
+        errors = {
+            field.name: field.errors
+            for field in form
+            if field.errors and field.name not in {"current_password", "new_password"}
+        }
+        if errors:
+            log_event("form_validation_failed", level="WARNING", user_id=user.id, username=user.username, details={"form": "change_password", "errors": errors})
 
     return render_template('change_password.html', form=form)
